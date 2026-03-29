@@ -1,9 +1,8 @@
-// Uses Google Gemini free tier (gemini-2.0-flash-lite) — no cost, no card needed.
-// Get a free key at: aistudio.google.com → Get API Key
-// Add GEMINI_API_KEY to Vercel environment variables.
+// Uses Groq free tier (llama-3.1-8b-instant) — completely free, no card needed.
+// Get a free key at: console.groq.com → API Keys → Create key
+// Add GROQ_API_KEY to Vercel environment variables.
 
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -13,10 +12,10 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const { problemTitle, steps } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not set" });
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "GROQ_API_KEY not set" });
 
-  // Compact prompt — every token counts on free tier
+  // Compact prompt — minimise tokens
   const stepsText = steps.map((s, i) =>
     `STEP${i + 1} [${s.id}] ${s.label}:\nCriteria: ${s.checks.map((c, j) => `${j + 1}.${c.text}`).join("; ")}\nAnswer: ${s.answer?.trim() || "(blank)"}`
   ).join("\n\n");
@@ -35,29 +34,34 @@ Reply ONLY with valid JSON (no markdown fences), exactly this shape:
     "design":        {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"},
     "flow":          {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"}
   },
-  "finalLevel": "SDE1"|"SDE2"|"SDE3",
+  "finalLevel": "SDE1" or "SDE2" or "SDE3",
   "globalFeedback": "<2 sentences: strength + top gap>"
 }
 Be generous — accept synonyms and equivalent concepts.`;
 
   try {
-    const geminiRes = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+    const groqRes = await fetch(GROQ_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 1200, temperature: 0.2 },
+        model: "llama-3.1-8b-instant",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1200,
+        temperature: 0.2,
       }),
     });
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error("Gemini error:", errText);
-      return res.status(500).json({ error: "Gemini API error", details: errText });
+    if (!groqRes.ok) {
+      const errText = await groqRes.text();
+      console.error("Groq error:", errText);
+      return res.status(500).json({ error: "Groq API error", details: errText });
     }
 
-    const data = await geminiRes.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const data = await groqRes.json();
+    const raw = data.choices?.[0]?.message?.content || "";
     const clean = raw.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
     const parsed = JSON.parse(clean);
     res.json(parsed);
