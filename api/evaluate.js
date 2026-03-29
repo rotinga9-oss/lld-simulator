@@ -78,7 +78,11 @@ Respond ONLY with a valid JSON object — no markdown, no explanation outside JS
 
     const data = await groqRes.json();
     const raw = data.choices?.[0]?.message?.content || "";
-    const clean = raw.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+    // Extract JSON robustly — grab everything between first { and last }
+    const firstBrace = raw.indexOf("{");
+    const lastBrace = raw.lastIndexOf("}");
+    if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found in response");
+    const clean = raw.slice(firstBrace, lastBrace + 1);
     const parsed = JSON.parse(clean);
     res.json(parsed);
   } catch (err) {
