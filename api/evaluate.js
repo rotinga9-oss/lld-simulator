@@ -1,4 +1,4 @@
-// Uses Groq free tier (llama-3.1-8b-instant) — completely free, no card needed.
+// Uses Groq free tier (llama-3.3-70b-versatile) — completely free, no card needed.
 // Get a free key at: console.groq.com → API Keys → Create key
 // Add GROQ_API_KEY to Vercel environment variables.
 
@@ -15,29 +15,39 @@ export default async function handler(req, res) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "GROQ_API_KEY not set" });
 
-  // Compact prompt — minimise tokens
-  const stepsText = steps.map((s, i) =>
-    `STEP${i + 1} [${s.id}] ${s.label}:\nCriteria: ${s.checks.map((c, j) => `${j + 1}.${c.text}`).join("; ")}\nAnswer: ${s.answer?.trim() || "(blank)"}`
-  ).join("\n\n");
+  const stepsText = steps.map((s, i) => {
+    const wordCount = (s.answer || "").trim().split(/\s+/).filter(Boolean).length;
+    return `STEP${i + 1} [${s.id}] ${s.label}:
+Criteria (${s.checks.length} items): ${s.checks.map((c, j) => `${j + 1}. ${c.text}`).join("; ")}
+Answer (${wordCount} words): """${s.answer?.trim() || ""}"""`;
+  }).join("\n\n");
 
-  const prompt = `You are a senior engineer evaluating an LLD interview for: ${problemTitle}
+  const prompt = `You are a strict SDE3 interviewer evaluating a Low-Level Design interview response.
+
+Problem: "${problemTitle}"
+
+STRICT EVALUATION RULES — follow these exactly:
+1. If an answer is EMPTY or fewer than 5 words, mark ALL its checkResults as passed:false and set assessment to "No answer provided."
+2. Only mark passed:true if the answer EXPLICITLY mentions that concept. Do NOT infer, assume, or give benefit of the doubt for things not written.
+3. A vague or off-topic answer should fail most checks.
+4. finalLevel must be "SDE1" if fewer than 40% checks passed, "SDE2" if 40-75%, "SDE3" only if 75%+ with quality explanations.
+5. globalFeedback must be honest — if answers were weak or missing, say so clearly.
 
 ${stepsText}
 
-Reply ONLY with valid JSON (no markdown fences), exactly this shape:
+Respond ONLY with a valid JSON object — no markdown, no explanation outside JSON:
 {
   "steps": {
-    "clarify":       {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"},
-    "entities":      {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"},
-    "relationships": {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"},
-    "patterns":      {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"},
-    "design":        {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"},
-    "flow":          {"checkResults":[{"passed":bool,"comment":"<10 words"}],"assessment":"<15 words","topMiss":"<10 words or null"}
+    "clarify":       {"checkResults":[{"passed":false,"comment":"one honest sentence"}],"assessment":"one honest sentence","topMiss":"most critical missing concept or null"},
+    "entities":      {"checkResults":[{"passed":false,"comment":"one honest sentence"}],"assessment":"one honest sentence","topMiss":"most critical missing concept or null"},
+    "relationships": {"checkResults":[{"passed":false,"comment":"one honest sentence"}],"assessment":"one honest sentence","topMiss":"most critical missing concept or null"},
+    "patterns":      {"checkResults":[{"passed":false,"comment":"one honest sentence"}],"assessment":"one honest sentence","topMiss":"most critical missing concept or null"},
+    "design":        {"checkResults":[{"passed":false,"comment":"one honest sentence"}],"assessment":"one honest sentence","topMiss":"most critical missing concept or null"},
+    "flow":          {"checkResults":[{"passed":false,"comment":"one honest sentence"}],"assessment":"one honest sentence","topMiss":"most critical missing concept or null"}
   },
-  "finalLevel": "SDE1" or "SDE2" or "SDE3",
-  "globalFeedback": "<2 sentences: strength + top gap>"
-}
-Be generous — accept synonyms and equivalent concepts.`;
+  "finalLevel": "SDE1",
+  "globalFeedback": "Honest 2-sentence summary: what was good (if anything) and what must improve."
+}`;
 
   try {
     const groqRes = await fetch(GROQ_URL, {
@@ -47,10 +57,16 @@ Be generous — accept synonyms and equivalent concepts.`;
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 1200,
-        temperature: 0.2,
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          {
+            role: "system",
+            content: "You are a strict technical interviewer. Never fabricate positive feedback for empty or weak answers. If an answer is blank, all checks fail. Output only valid JSON."
+          },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 1500,
+        temperature: 0.1,
       }),
     });
 
